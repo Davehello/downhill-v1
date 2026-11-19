@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+  <title>DOWNHILL V1</title>
+  <style>
+    :html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#9dcef2}
+    canvas{display:block}
+    #screen{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(180deg,#78afe055,#082744aa)}
+    #panel{width:min(480px,calc(100% - 32px));box-sizing:border-box;text-align:center;color:white;padding:32px;border:1px solid #ffffff88;border-radius:22px;background:#143652cc;box-shadow:0 20px 70px #05182766;backdrop-filter:blur(12px)}
+    h1{margin:0;font-size:64px;letter-spacing:.12em;text-shadow:0 5px 18px #06182788}
+    p{opacity:.85}.row{display:flex;gap:10px;margin-top:18px}input,button{font:inherit;border:0;border-radius:11px;padding:13px 14px}input{min-width:0;flex:1;color:#19384c}button{cursor:pointer;font-weight:800;color:#16384e;background:linear-gradient(135deg,#fff,#b4e8ff)}button:hover{filter:brightness(1.06)}
+    #hud{display:none;position:fixed;inset:18px 20px auto;justify-content:space-between;color:white;text-shadow:0 2px 8px #17384f;font-weight:700;pointer-events:none}#hud div{padding:10px 14px;border:1px solid #ffffff55;border-radius:12px;background:#0e314c88;backdrop-filter:blur(5px)}
+    #progress{display:none;position:fixed;top:82px;left:50%;width:min(380px,55vw);height:8px;transform:translateX(-50%);border-radius:99px;background:#fff8;overflow:hidden}#bar{height:100%;width:0;background:linear-gradient(90deg,#75dffa,#fff)}
+  </style>
+</head>
+<body>
+  <div id="hud"><div><span id="speed">0 km/h</span><br><small id="seed">SEED</small></div><div style="text-align:right">W/S 가속·감속<br>A/D 방향 · Shift 자세 · Space 점프</div></div>
+  <div id="progress"><div id="bar"></div></div>
+  <div id="screen"><div id="panel"><h1>DOWNHILL</h1><p>설산 아래까지 스키를 타고 내려가세요</p><div class="row"><input id="seedInput" placeholder="Seed를 입력하세요"><button id="start">활강 시작</button></div></div></div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js';
+
+    const COURSE=3000,W=150;
+    const scene=new THREE.Scene();scene.background=new THREE.Color(0xbadcf3);scene.fog=new THREE.FogExp2(0xbadcf3,.0018);
+    const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,1300);
+    const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.1;document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0xdaf4ff,0x657c88,2.2));const sun=new THREE.DirectionalLight(0xfff4dc,2.6);sun.position.set(-110,170,50);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-120;sun.shadow.camera.right=120;sun.shadow.camera.top=120;sun.shadow.camera.bottom=-120;sun.shadow.camera.far=500;scene.add(sun);
+
+    const snow=new THREE.MeshStandardMaterial({color:0xeaf5fa,roughness:.73,metalness:.03});
+    const snowBlue=new THREE.MeshStandardMaterial({color:0xc8dde8,roughness:.9});
+    const trunkMat=new THREE.MeshStandardMaterial({color:0x68492f,roughness:.95});
+    const pineMats=[0x1a5246,0x276b55,0x347a5e].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:.9}));
+    const rockMat=new THREE.MeshStandardMaterial({color:0x7b8589,roughness:.85});
+
+    const hills=[[-8,420,5,15,24],[7,930,7,17,27],[-4,1570,8,19,30],[10,2220,7,17,26],[-6,2710,9,20,31]];
+    function height(x,p){let y=82-p*.027;y+=Math.sin(p*.008)*1.7+Math.sin(p*.021)*.5-Math.max(0,Math.abs(x)-36)*.055;y+=Math.sin(x*.045+p*.006)*.4;for(const[hx,hp,hh,wx,wz] of hills)y+=hh*Math.exp(-.5*((x-hx)/wx)**2*((p-hp)/wz)**2);return y}
+
+    function terrain(){const nx=180,nz=900,pos=[],idx=[];for(let iz=0;iz<=nz;iz++){const p=COURSE*iz/nz,z=-p;for(let ix=0;ix<=nx;ix++){const x=-W/2+W*ix/nx;pos.push(x,height(x,p),z)}}for(let iz=0;iz<nz;iz++)for(let ix=0;ix<nx;ix++){const a=iz*(nx+1)+ix,b=a+1,c=a+nx+1,d=c+1;idx.push(a,b,c,b,d,c)}const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();return g}
+    const ground=new THREE.Mesh(terrain(),snow);ground.receiveShadow=true;scene.add(ground);
+
+    const obstacles=new THREE.Group();scene.add(obstacles);let boxes=[];
+    const rand=(seed=>{let s=seed>>>0;return()=>{s=(s+0x6D2B79F5)>>>0;let t=s;t=Math.imul(t^(t>>>15),t|1);t^=t+Math.imul(t^(t>>>7),t|61);return((t^(t>>>14))>>>0)/4294967296}});
+    function hash(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+
+    function addTree(x,p,r){const g=new THREE.Group();const h=r()*5+8.5;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.24,.48,h*.48,8),trunkMat);trunk.position.y=h*.24;trunk.castShadow=true;g.add(trunk);for(let i=0;i<4;i++){const cone=new THREE.Mesh(new THREE.ConeGeometry(h*(.38-i*.055),h*.48,9),pineMats[Math.floor(r()*3)]);cone.position.y=h*(.38+i*.16);cone.castShadow=true;g.add(cone);const cap=new THREE.Mesh(new THREE.ConeGeometry(h*(.255-i*.035),h*.22,9),snow);cap.position.set(r()*.12,h*(.44+i*.16),r()*.08);cap.castShadow=true;g.add(cap)}g.position.set(x,height(x,p),-p);obstacles.add(g);return 2.2}
+    function addRock(x,p,r){const g=new THREE.Group();const sx=1.5+r()*2.2,sy=1+r()*1.8,sz=1.2+r()*1.8;const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(1,1),rockMat);rock.scale.set(sx,sy,sz);rock.rotation.set(r()*3,r()*6,r()*2);rock.position.y=sy*.78;rock.castShadow=true;rock.receiveShadow=true;g.add(rock);const cap=new THREE.Mesh(new THREE.IcosahedronGeometry(1,1),snow);cap.scale.set(sx*.82,sy*.38,sz*.78);cap.position.set(0,sy*1.22,r()*-.2);cap.castShadow=true;g.add(cap);g.position.set(x,height(x,p),-p);obstacles.add(g);return sx*.9}
+    function addBank(x,p,r){const g=new THREE.Group();const sx=8+r()*4,sy=2+r()*2.4;const bank=new THREE.Mesh(new THREE.SphereGeometry(1,18,9,0,Math.PI*2,0,Math.PI*.48),snow);bank.scale.set(sx,sy,sx*.72);bank.position.y=sy*.55;bank.castShadow=true;bank.receiveShadow=true;g.add(bank);g.position.set(x,height(x,p),-p);obstacles.add(g);return sx*.55}
+    function addLog(x,p,r){const g=new THREE.Group(),len=5+r()*4;const log=new THREE.Mesh(new THREE.CylinderGeometry(.55,.75,len,10),trunkMat);log.rotation.z=Math.PI/2;log.position.y=.72;log.castShadow=true;g.add(log);g.position.set(x,height(x,p),-p);obstacles.add(g);return 3}
+    function addStump(x,p,r){const g=new THREE.Group();const stump=new THREE.Mesh(new THREE.CylinderGeometry(.75,1.05,1.45,10),trunkMat);stump.position.y=.72;stump.castShadow=true;g.add(stump);const top=new THREE.Mesh(new THREE.CylinderGeometry(.74,.74,.08,10),new THREE.MeshStandardMaterial({color:0xaa8056,roughness:.95}));top.position.y=1.47;g.add(top);g.position.set(x,height(x,p),-p);obstacles.add(g);return 1.8}
+    function addRoots(x,p,r){const g=new THREE.Group();for(let i=0;i<5;i++){const root=new THREE.Mesh(new THREE.CylinderGeometry(.12,.35,2+r()*2,7),trunkMat);root.position.set(r()*2-1,.25,r()*1.7-.85);root.rotation.z=r()*1.1-.55;root.rotation.x=r()*1-.5;root.castShadow=true;g.add(root)}g.position.set(x,height(x,p),-p);obstacles.add(g);return 2.2}
+
+    function generate(seed){obstacles.clear();boxes=[];const r=rand(hash(seed)),placed=[];for(let p=55;p<COURSE-45;p+=30){let chance=p<900?.72:p<1950?.42:.68;if(r()>chance)continue;for(let n=0;n<2;n++){let ok=false;for(let a=0;a<20&&!ok;a++){const cp=p+(r-.5)*18,cx=(r()*2-1)*49;if(Math.abs(cx)<5.5)continue;if(placed.some(o=>Math.hypot(o.x-cx,(o.p-cp)*.7)<9))continue;let pool=p<900?['tree','tree','roots','stump','rock']:p<1950?['rock','rock','bank','tree']:['rock','bank','log','roots','stump','tree'];const type=pool[Math.floor(r()*pool.length)],rad={tree:addTree,rock:addRock,bank:addBank,log:addLog,stump:addStump,roots:addRoots}[type](cx,cp,r);placed.push({x:cx,p:cp});boxes.push({x:cx,p:cp,r:rad,type});ok=true}}}};
+
+    const rig=new THREE.Group();camera.position.set(0,0,0);rig.add(camera);scene.add(rig);
+    const skiDark=new THREE.MeshStandardMaterial({color:0x163850,metalness:.18,roughness:.28});const skiWhite=new THREE.MeshStandardMaterial({color:0xf3fbff,roughness:.35});for(const x of[-.28,.28]){const ski=new THREE.Mesh(new THREE.BoxGeometry(.14,.055,1.7),skiDark);ski.position.set(x,-.64,-1.05);ski.castShadow=true;camera.add(ski);const top=new THREE.Mesh(new THREE.BoxGeometry(.075,.012,1.32),skiWhite);top.position.set(x,-.605,-1.05);camera.add(top)}
+
+    const finish=new THREE.Group();const poleMat=new THREE.MeshStandardMaterial({color:0xf7ffff,roughness:.5});for(const x of[-12,12]){const pole=new THREE.Mesh(new THREE.CylinderGeometry(.12,.16,5,10),poleMat);pole.position.set(x,2.5,-COURSE);pole.castShadow=true;finish.add(pole)}const banner=new THREE.Mesh(new THREE.BoxGeometry(24,.55,.55),new THREE.MeshStandardMaterial({color:0xef4452,roughness:.5}));banner.position.set(0,4.65,-COURSE);finish.add(banner);scene.add(finish);
+
+    const $=id=>document.getElementById(id),screen=$('screen'),start=$('start'),seedInput=$('seedInput'),hud=$('hud'),speedUI=$('speed'),seedUI=$('seed'),progressUI=$('progress'),bar=$('bar');
+    let running=false,finished=false,seed='',x=0,side=0,speed=0,progress=0,air=0,vy=0,impact=0,elapsed=0,keys={},last=performance.now(),jumped=new Set();
+    function reset(){seed=seedInput.value.trim()||'snow-'+Math.floor(Math.random()*1e6);generate(seed);x=0;side=0;speed=0;progress=0;air=0;vy=0;impact=0;elapsed=0;jumped=new Set();running=true;finished=false;screen.style.display='none';hud.style.display='flex';progressUI.style.display='block';seedUI.textContent='SEED: '+seed}
+    start.onclick=reset;seedInput.onkeydown=e=>{if(e.key==='Enter')reset()};
+    addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();if(e.code==='Space'&&running&&air<.04&&speed>2){vy=7.7;air=.05}});addEventListener('keyup',e=>keys[e.code]=false);addEventListener('blur',()=>keys={});
+
+    function collision(){for(const o of boxes){if(Math.abs(o.p-progress)>o.r+2.1)continue;if(Math.abs(o.x-x)<o.r+.65){impact=1.15;speed=0;side*=-.25;x+=x<o.x?-1.3:1.3;return}}}
+    function update(dt){if(running&&!finished){elapsed+=dt;if(impact>0){impact-=dt;speed=0}else{const crouch=keys.ShiftLeft||keys.ShiftRight,brake=keys.KeyS||keys.ArrowDown,go=keys.KeyW||keys.ArrowUp;speed=THREE.MathUtils.clamp(speed+(1.1+(go?5.5:0)-(brake?16:0)+(crouch?2.8:0))*dt,brake?2:7,crouch?31:27);const steer=(keys.KeyD||keys.ArrowRight?1:0)-(keys.KeyA||keys.ArrowLeft?1:0);side=THREE.MathUtils.damp(side,steer*(crouch?8.5:14),5.2,dt);x=THREE.MathUtils.clamp(x+side*dt,-58,58);const old=progress;progress+=speed*dt;for(let i=0;i<hills.length;i++){const hp=hills[i][1],hx=hills[i][0],wx=hills[i][3];if(!jumped.has(i)&&old<hp&&progress>=hp&&Math.abs(x-hx)<wx*1.1){vy=5.5+hills[i][2]*.35;jumped.add(i)}}if(air>0||vy>0){vy-=15*dt;air+=vy*dt;if(air<0){air=0;vy=0}}collision();if(progress>=COURSE){progress=COURSE;running=false;finished=true;const m=Math.floor(elapsed/60),s=Math.floor(elapsed%60).toString().padStart(2,'0');screen.querySelector('#panel').innerHTML=`<h1>완주!</h1><p>기록 ${m}:${s}</p><p>SEED: ${seed}</p><div class="row"><button id="restart">다시 활강</button></div>`;start=document.getElementById('restart');start.onclick=()=>location.reload();screen.style.display='grid'}}}const groundH=height(x,progress);rig.position.set(x,groundH+1.38+air,-progress);rig.rotation.z=THREE.MathUtils.damp(rig.rotation.z,-side*.006,4,dt);rig.rotation.x=THREE.MathUtils.damp(rig.rotation.x,(keys.ShiftLeft||keys.ShiftRight)?.035:0,3,dt);camera.fov=THREE.MathUtils.damp(camera.fov,70+speed*.22,4,dt);camera.updateProjectionMatrix();speedUI.textContent=Math.round(speed*3.6)+' km/h';bar.style.width=Math.min(100,progress/COURSE*100)+'%'}
+
+    function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;update(dt);renderer.render(scene,camera)}requestAnimationFrame(animate);
+    addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,2))});
+  </script>
+</body>
+</html>
